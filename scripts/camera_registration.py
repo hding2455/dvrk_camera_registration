@@ -106,7 +106,7 @@ class CameraRegistrationApplication:
         self.messages.info(
             "Range of motion displayed in plot, close plot window to continue"
         )
-        convex_hull.display_hull(hull)
+        # convex_hull.display_hull(hull)
         return self.ok, hull
 
     # Make sure target is visible and PSM is within range of motion
@@ -121,8 +121,10 @@ class CameraRegistrationApplication:
                 continue
 
             jp = numpy.copy(self.psm.measured_jp())
-            visible = self.tracker.is_target_visible(timeout=1)
+            visible = self.tracker.is_target_visible(timeout=10)
             in_rom = convex_hull.in_hull(safe_range, jp)
+            ####
+            in_rom = True
 
             if not visible:
                 self.done = False
@@ -150,8 +152,8 @@ class CameraRegistrationApplication:
     # field of view via exploration while staying within safe range of motion
     # Once field of view is found, collect additional pose samples
     def collect_data(self, safe_range, start_jp, edge_samples=4):
-        current_jp = numpy.copy(start_jp)
-        current_jp[4:6] = numpy.zeros(2)
+        # current_jp = numpy.copy(start_jp)
+        # current_jp[4:6] = numpy.zeros(2)
 
         target_poses = []
         robot_poses = []
@@ -160,14 +162,14 @@ class CameraRegistrationApplication:
             nonlocal target_poses
             nonlocal robot_poses
 
-            if not convex_hull.in_hull(safe_range, joint_pose):
-                self.messages.error("Safety limit reached!")
-                return False
+            # if not convex_hull.in_hull(safe_range, joint_pose):
+            #     self.messages.error("Safety limit reached!")
+            #     return False
 
             self.psm.move_jp(joint_pose).wait()
             time.sleep(0.5)
 
-            ok, target_pose = self.tracker.acquire_pose(timeout=4.0)
+            ok, target_pose = self.tracker.acquire_pose(timeout=20.0)
             if not ok:
                 return False
 
@@ -209,12 +211,22 @@ class CameraRegistrationApplication:
 
             end_point = start_pose[0:3] + 0.9 * near_limit * ray
             if len(target_poses) > 0:
+                # print(target_poses[-1])
                 self.tracker.display_point(target_poses[-1][1], (255, 123, 66), size=7)
-
+            
             return end_point
 
+        def mannual_decide_limits():
+            time.sleep(0.5)
+            while True:
+                key = input("Move to an edge case and press enter\n")
+                jp = numpy.copy(self.psm.measured_jp())
+                return True, jp[0:3] 
+
+
+
         def collect(poses, tool_shaft_rotation=math.pi / 8.0):
-            self.messages.progress(0.0)
+            # self.messages.progress(0.0)
             for i, pose in enumerate(poses):
                 if not self.ok or self.ral.is_shutdown():
                     return
@@ -233,7 +245,8 @@ class CameraRegistrationApplication:
                         self.tracker.display_point(target_poses[-1][1], (255, 255, 0))
                         break
 
-                self.messages.progress((i + 1) / len(sample_poses))
+                print((i + 1) / len(sample_poses), "poses collected")
+                # self.messages.progress((i + 1) / len(sample_poses))
 
         self.messages.line_break()
         self.messages.info("Determining limits of camera view...")
@@ -247,11 +260,17 @@ class CameraRegistrationApplication:
                     return None
 
                 ray[axis] = direction
-                limits.append(bisect_camera_view(current_jp, ray))
+                #limits.append(bisect_camera_view(current_jp, ray))
+                ret, jp = mannual_decide_limits()
+                if ret:
+                    limits.append(jp)
                 self.messages.progress(len(limits) / 6)
         self.messages.line_break()
 
         # Limits found above define octahedron, take samples along all 12 edges
+        
+        current_jp = numpy.copy(self.psm.measured_jp())
+
         sample_poses = []
         for i in range(len(limits)):
             start = i + 2 if i % 2 == 0 else i + 1
@@ -262,12 +281,17 @@ class CameraRegistrationApplication:
                     pose = numpy.copy(current_jp)
                     pose[0:3] = limits[j] + t * (limits[i] - limits[j])
                     sample_poses.append(pose)
+        
 
         self.messages.info("Collecting pose data...")
         collect(sample_poses)
         self.messages.line_break()
 
         self.messages.info("Data collection complete\n")
+        numpy.save("target_poses_rotation.npy", [p[0] for p in target_poses])
+        numpy.save("target_poses_translation.npy", [p[1] for p in target_poses])
+        numpy.save("robot_poses_rotation.npy", [p[0] for p in robot_poses])
+        numpy.save("robot_posestranslation.npy", [p[1] for p in robot_poses])
         return robot_poses, target_poses
 
     def compute_registration(self, robot_poses, target_poses):
@@ -378,15 +402,19 @@ class CameraRegistrationApplication:
             if not self.ok:
                 return
             print("finish setup")
-            ok, safe_range = self.determine_safe_range_of_motion()
-            if not self.ok or not ok:
-                return
+            # ok, safe_range = self.determine_safe_range_of_motion()
+            # if not self.ok or not ok:
+            #     return
 
-            ok, start_jp = self.ensure_target_visible(safe_range)
-            if not self.ok or not ok:
-                return
+            # ok, start_jp = self.ensure_target_visible(safe_range)
+            # if not self.ok or not ok:
+            #    return
+
+            safe_range = None
+            start_jp = None
 
             data = self.collect_data(safe_range, start_jp)
+
             if not self.ok:
                 return
 
