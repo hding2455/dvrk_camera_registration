@@ -275,7 +275,7 @@ class VisionTracker:
                     frame = self.image_queue.get(block=True, timeout=1)
                 except queue.Empty:
                     print("\nNo camera image available, waited for 1 second\n")
-                    self._quit_handler()
+                    #self._quit_handler()
                     continue
 
                 self._process_targets(frame)
